@@ -130,3 +130,115 @@ void print_tree(struct tree *root, int show_pids, int col) {
     }
 
 }
+
+
+// here we use int *width to track the col of each parent node
+// level is the num of parent node .
+void print_tree_1(struct tree *root, int show_pids, int level, int col) {
+
+    if (root == NULL) {
+        return ;
+    }
+    
+    // print the current node 
+    
+    // if pid = 0 , skip it 
+    if (root->pid != 0) {
+        // print the command name 
+        printf("%s", root->command);
+
+        col += strlen(root->command);
+
+        // if show_pids is true, print the PID in ()
+        if (show_pids) {
+            printf("(%d)", root->pid);
+            char pid_str[32];
+            int len = snprintf(pid_str, sizeof(pid_str), "(%d)", root->pid);
+            if (len < 0) {
+                perror("snprintf");
+                exit(EXIT_FAILURE);
+            }
+            col += len ;
+        }
+
+    }
+
+
+    if (root->num_children == 0) {
+        // no children , just a leaf
+        printf("\n");
+
+    } else {
+
+        // add this node's col to width[level]
+        if (width == NULL) {
+            width = malloc(sizeof(int) * 64);
+            if (width == NULL) {
+                perror("malloc");
+                exit(EXIT_FAILURE);
+            }
+        }   
+
+        if (last == NULL) {
+            last = malloc(sizeof(int) * 64);
+            if (last == NULL) {
+                perror("malloc");
+                exit(EXIT_FAILURE);
+            }
+        }
+
+        width[level] = col+1;
+        last[level] = 0;
+        level += 1;
+
+
+        // loop through the children and print them 
+        for (int i = 0; i < root->num_children; i++) {
+
+            if (i == root->num_children - 1) {
+                last[level-1] = 1;
+            }
+
+            if (i == 0) {
+                if (root->num_children == 1) {
+                    printf("---");
+                } else {
+                    printf("-+-");
+                }
+                print_tree_1(root->childrens[i], show_pids, level, col + 3);
+            } else {
+                // print the vertical line for the previous parent node 
+                for (int j = 0; j < level; j++) {
+                    int start,end;
+                    if (j == 0) {
+                        start = 0;
+                    } else {
+                        start = width[j-1]+1;
+                    }
+                    end = width[j];
+                    for (int k = start; k < end; k++) {
+                        printf(" ");
+                    }
+                    if (j < level-1) {
+                        if (last[j] == 0) {
+                            printf("|");
+                        } else {
+                            printf(" ");
+                        }
+                    }
+                }
+
+                if (i == root->num_children - 1) {
+                    printf("`-");
+                } else {
+                    printf("|-");
+                }
+
+                print_tree_1(root->childrens[i], show_pids, level, col + 3);
+            }
+        }
+
+        // after printing all children , we need to reset the level to the previous level
+        level -= 1;
+    }
+}

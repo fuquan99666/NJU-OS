@@ -7,6 +7,9 @@
 
 #define MAX_PROCESSES 2048
 
+int *width = NULL;
+int *last = NULL;
+
 int main(int argc, char *argv[]) {
   // for (int i = 0; i < argc; i++) {
   //   assert(argv[i]);
@@ -170,11 +173,11 @@ int main(int argc, char *argv[]) {
   // Step 4: Build a tree structure of based on the list and sort by parameters 
 
   // the root of the tree 
-  struct tree root = { .pid = 0, .ppid = -1, .command = "root", .num_children = 0, .parent = NULL };
+  struct tree root = { .pid = 1, .ppid = 0, .command = "systemd", .num_children = 0, .parent = NULL };
 
   create_tree(&root, process_list, num, numeric_sort);
 
   // Step 5: Print the tree structure in a readable format 
 
-  print_tree(&root, show_pids, 0);
+  print_tree_1(&root, show_pids, 0, 0);
 }

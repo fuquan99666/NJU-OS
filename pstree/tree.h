@@ -27,6 +27,11 @@ void create_tree(struct tree *root, struct process_info *process_list, int num_p
 
 void print_tree(struct tree *root, int show_pids, int col);
 
+extern int *width; 
+extern int *last;
+
+void print_tree_1(struct tree *root, int show_pids, int level, int col);
+
 int compare_by_pid(const void *a, const void *b);
 
 int compare_by_command(const void *a, const void *b);

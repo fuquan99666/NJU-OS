@@ -3,13 +3,13 @@
 #include <klib-macros.h>
 #include <stdarg.h>
 
+#if !defined(__ISA_NATIVE__) || defined(__NATIVE_USE_KLIB__)
+
 static int printf_lock = 0;
 static int vsprintf_lock = 0;
 static int sprintf_lock = 0;
 static int snprintf_lock = 0;
 static int vsnprintf_lock = 0;
-
-#if !defined(__ISA_NATIVE__) || defined(__NATIVE_USE_KLIB__)
 
 int printf(const char *fmt, ...) {
 
@@ -68,6 +68,7 @@ int printf(const char *fmt, ...) {
 
   // release the lock 
   atomic_xchg(&printf_lock, 0);
+  return 0;
 }
 
 int vsprintf(char *out, const char *fmt, va_list ap) {
@@ -113,7 +114,10 @@ int vsprintf(char *out, const char *fmt, va_list ap) {
     }
   }
 
+  // release the lock
+  atomic_xchg(&vsprintf_lock, 0);
 
+  return 0;
 }
 
 int sprintf(char *out, const char *fmt, ...) {

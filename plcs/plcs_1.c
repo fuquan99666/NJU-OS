@@ -10,19 +10,8 @@
 #define MAXT 64
 int T, N, M;
 char A[MAXN + 1], B[MAXN + 1];
-char *sa, *sb;
 int dp[MAXN][MAXN];
-int iteration;
-
-#define CAN_WORK (subtask_queue[id - 1].num > 0)
-#define ALL_DONE (flag == T)
-#define OVER (iteration == N+M-1)
-
-volatile int flag = 0;
-
-cond_t cv = COND_INIT();
-mutex_t lk = MUTEX_INIT();
-mutex_t lks[MAXT] = {MUTEX_INIT()};
+int result;
 
 #define DP(x, y) (((x) >= 0 && (y) >= 0) ? dp[x][y] : 0)
 #define MAX(x, y) (((x) > (y)) ? (x) : (y))
@@ -54,54 +43,7 @@ void Tworker(int id) {
     }
   }
 
-}
-
-void Tworker_1(int id) {
-
-  // use threads_lock to control when to start Tworker_1
-
-  int pos_a, pos_b, num;
-
-  while(1) {
-
-    mutex_lock(&lk);
-
-    while (!CAN_WORK && !OVER) {
-      cond_wait(&cv, &lk);
-    }
-
-    if (OVER) {
-      mutex_unlock(&lk);
-      break;
-    }
-    mutex_unlock(&lk);
-
-    pos_a = subtask_queue[id - 1].pos_a;
-    pos_b = subtask_queue[id - 1].pos_b;
-    num = subtask_queue[id - 1].num;
-
-    // we update the dp table of the current area, which is a small diag .
-
-    for (int i = 0; i < num; i++) {
-      int a = pos_a + i;
-      int b = pos_b - i;
-
-      // Always try to make DP code more readable
-      int skip_a = DP(a - 1, b);
-      int skip_b = DP(a, b - 1);
-      int take_both = DP(a - 1, b - 1) + (sa[a] == sb[b]);
-      dp[a][b] = MAX3(skip_a, skip_b, take_both);
-    }
-
-    subtask_queue[id - 1].num = 0; 
-
-    mutex_lock(&lk);
-    flag += 1;
-    if (flag == T) {
-      cond_broadcast(&cv);
-    }
-    mutex_unlock(&lk);
-  }
+  result = dp[N - 1][M - 1];
 }
 
 int count_tasks(int iter_index) {
@@ -120,7 +62,7 @@ void assign_tasks(int total_tasks, int iteration){
   int pos_a,pos_b;
 
   // initial position of computing DAG from left bottom
-  if (iteration < M) {pos_a = 0;} else {pos_a = iteration-M+1;}
+  pos_a = 0;
   if (iteration < M) {pos_b = iteration;} else {pos_b = M-1;}
 
   // For every thread: set the position and tasks number
@@ -136,12 +78,6 @@ void assign_tasks(int total_tasks, int iteration){
     pos_a += subtask_to_assign;
     pos_b -= subtask_to_assign;
 
-    if (subtask_to_assign == 0) {
-      mutex_lock(&lk);
-      flag += 1;
-      mutex_unlock(&lk);
-    }
-
     // set subtasks number at last
     subtask_queue[i].num = subtask_to_assign;
   }
@@ -153,24 +89,12 @@ int main(int argc, char *argv[]) {
   N = strlen(A);
   M = strlen(B);
 
+  int temp;
+
   struct timespec start, end;
   clock_gettime(CLOCK_MONOTONIC, &start);
 
-  int temp;
-
-  // make len(A)>=len(B)
-  if (N < M) {
-    sa = B; sb = A;
-    temp = M; M = N; N = temp;
-  }
-  else {
-    sa = A; sb = B;
-  }
-
   T = !argv[1] ? 1 : atoi(argv[1]);
-
-  printf("Using %d threads\n", T);
-  printf("Length of A: %d, Length of B: %d\n", N, M);
 
   // Add preprocessing code here
   // initial subtask queue && create Tworker threads
@@ -178,37 +102,25 @@ int main(int argc, char *argv[]) {
     subtask_queue[i] = (subtask){
       .num = 0
     };
-    create(Tworker_1);
+    create(Tworker);
   }
 
   int total_tasks;
-  for (iteration = 0; iteration < N+M-1; iteration++) {
-
-    flag = 0;
-
+  for (int iteration = 0; iteration < N+M-1; iteration++) {
     // compute total tasks and assign them
     total_tasks = count_tasks(iteration);
     assign_tasks(total_tasks, iteration);
 
+    // start iteration
 
     // complete iteration and aggragation
-    mutex_lock(&lk);
-
-    cond_broadcast(&cv);
-
-    while(!ALL_DONE) {
-      cond_wait(&cv, &lk);
-    }
-    mutex_unlock(&lk);
   }
 
-  cond_broadcast(&cv);
-
-  join();
+  join();  // Wait for all workers
 
   clock_gettime(CLOCK_MONOTONIC, &end);
   double time_spent = (double)(end.tv_sec - start.tv_sec) + (double)(end.tv_nsec - start.tv_nsec) / 1e9;
 
-  printf("%d\n", dp[N-1][M-1]);
+  printf("%d\n", result);
   printf("Time spent: %f seconds\n", time_spent);
 }

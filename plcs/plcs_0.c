@@ -1,3 +1,5 @@
+// A easy implementation of LCS problem, one thread to compute the result.
+
 #define _POSIX_C_SOURCE 200809L
 #include <stdio.h>
 #include <stdlib.h>
@@ -5,8 +7,8 @@
 #include <string.h>
 #include <time.h>
 
-#define MAXN 10000
-int T, N, M;
+#define MAXN 60000
+int N, M;
 char A[MAXN + 1], B[MAXN + 1];
 int dp[MAXN][MAXN];
 int result;

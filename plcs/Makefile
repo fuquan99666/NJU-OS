@@ -13,15 +13,24 @@ test_0: a.out plcs_0
 	@echo "Testing sequential implementation"
 	@echo "QWERTYUIOPASDFGHJKLZXCVBNMQWERTYUIOPASDFGHJKLZXCVBNMQWERTYUIOPASDFGHJKLZXCVBNM ASDFGHJKLPOIUYTREWQMNBVCXZASDFGHJKLPOIUYTREWQMNBVCXZASDFGHJKLPOIUYTREWQMNBVCXZ" | ./plcs_0
 
-test: a.out plcs_0 
-	@echo "Testing parallel implementation"
-	@python help.py | ./a.out 8
-	@echo " "
+test: plcs_0 plcs_3
 	@echo "Testing sequential implementation"
 	@python help.py | ./plcs_0
+	@echo " "
+	@echo "Testing parallel implementation"
+	@python help.py | ./plcs_3 4
+
+test_full: plcs_0 plcs_3
+	@python3 test_plcs.py
 
 a.out : plcs.c
 	gcc plcs.c 
 
 plcs_0 : plcs_0.c
-	gcc plcs_0.c -o plcs_0
+	gcc -mcmodel=large plcs_0.c -o plcs_0
+
+plcs_2: plcs_2.c
+	gcc -mcmodel=large plcs_2.c -o plcs_2 
+
+plcs_3: plcs_3.c
+	gcc -mcmodel=large plcs_3.c -o plcs_3

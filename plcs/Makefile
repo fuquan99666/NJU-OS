@@ -18,7 +18,7 @@ test: plcs_0 plcs_3
 	@python help.py | ./plcs_0
 	@echo " "
 	@echo "Testing parallel implementation"
-	@python help.py | ./plcs_3 4
+	@python help.py | ./plcs_3 8
 
 test_full: plcs_0 plcs_3
 	@python3 test_plcs.py

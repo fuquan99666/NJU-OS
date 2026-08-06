@@ -29,6 +29,7 @@ int printf(const char *fmt, ...) {
   int d;
   char c;
   char *s;
+  uintptr_t p; // for 32 and 64 bit arch, uintptr_t is enough to hold a pointer
 
   va_start(ap, fmt);
   while(*fmt) {
@@ -54,6 +55,13 @@ int printf(const char *fmt, ...) {
         s = va_arg(ap, char *);
         putstr(s);
 
+        break;
+
+      case 'p':
+        p = va_arg(ap, uintptr_t);
+        char hex[64];
+        itoa(p, hex, 16);
+        putstr(hex);
         break;
       
       default:
@@ -84,6 +92,7 @@ int vsprintf(char *out, const char *fmt, va_list ap) {
   int d;
   char c;
   char *s;
+  uintptr_t p;
 
   while(*fmt) {
     if (*fmt == '%') {
@@ -108,9 +117,21 @@ int vsprintf(char *out, const char *fmt, va_list ap) {
           *out++ = *p;
         }
         break;
+
+      case 'p':
+        p = va_arg(ap, uintptr_t);
+        char hex[64];
+        itoa(p, hex, 16);
+        for (char *p = hex; *p; p++) {
+          *out++ = *p;
+        }
+        break;
+        
       default:
         assert(0);
       }
+    } else {
+      *out++ = *fmt++;
     }
   }
 

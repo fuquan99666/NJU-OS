@@ -79,7 +79,7 @@ void __am_lapic_init() {
           ptr += 12;
           panic_on(++__am_ncpu > MAX_CPU, "cannot support > MAX_CPU processors");
         }
-      }
+      }  
       return;
     }
   }

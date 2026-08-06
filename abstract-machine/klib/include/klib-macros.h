@@ -11,6 +11,7 @@
 #define TOSTRING(s)         STRINGIFY(s)
 #define _CONCAT(x, y)       x ## y
 #define CONCAT(x, y)        _CONCAT(x, y)
+#define DEBUG             putstr("OhOh!\n")
 
 #define putstr(s) \
   ({ for (const char *p = s; *p; p++) putch(*p); })

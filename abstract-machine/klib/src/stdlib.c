@@ -33,32 +33,62 @@ int atoi(const char* nptr) {
 
 void itoa(int value, char *str, int base) {
   // now only support base 10
-  if (base != 10) {
-    panic("itoa only support base 10");
+  if (base != 10 && base != 16) {
+    panic("itoa only support base 10 and 16");
   }
-  char *p = str;
-  if (value < 0) {
-    *p++ = '-';
-    value = -value;
-  }
-  char *start = p;
-  
-  while(true) {
-    *p++ = '0' + value % 10;
-    value /= 10;
-    if (value == 0) {
-      break;
+
+  if (base == 10) {
+
+    char *p = str;
+    if (value < 0) {
+      *p++ = '-';
+      value = -value;
+    }
+    char *start = p;
+    
+    while(true) {
+      *p++ = '0' + value % 10;
+      value /= 10;
+      if (value == 0) {
+        break;
+      }
+    }
+    *p = '\0';
+    // reverse the string
+    char *end = p - 1;
+    while (start < end) {
+      char tmp = *start; 
+      *start++ = *end;
+      *end-- = tmp;
+    }
+  } else if (base == 16) {
+    // convert a number to a string in hex format 
+    char *p = str;
+    *p++ = '0';
+    *p++ = 'x';
+    char *start = p;
+    
+    while(true) {
+      int digit = value % 16;
+      if (digit < 10) {
+        *p++ = '0' + digit;
+      } else {
+        *p++ = 'a' + digit - 10;
+      }
+      value /= 16;
+      if (value == 0) {
+        break;
+      }
+    }
+    *p = '\0';
+    // reverse the string
+    char *end = p - 1;
+    while (start < end) {
+      char tmp = *start;
+      *start++ = *end;
+      *end-- = tmp;
     }
   }
-  *p = '\0';
-  // reverse the string
-  char *end = p - 1;
-  while (start < end) {
-    char tmp = *start; 
-    *start++ = *end;
-    *end-- = tmp;
-  }
-  
 }
 
 void *malloc(size_t size) {

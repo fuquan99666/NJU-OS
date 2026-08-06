@@ -3,13 +3,13 @@
 static void *kalloc(size_t size) {
     // TODO
     // You can add more .c files to the repo.
-
-    return NULL;
+    return malloc(size);
 }
 
 static void kfree(void *ptr) {
     // TODO
     // You can add more .c files to the repo.
+    return free(ptr);
 }
 
 static void pmm_init() {
@@ -17,6 +17,7 @@ static void pmm_init() {
         (uintptr_t)heap.end
         - (uintptr_t)heap.start
     );
+
 
     printf(
         "Got %d MiB heap: [%p, %p)\n",

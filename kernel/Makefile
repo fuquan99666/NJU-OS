@@ -23,4 +23,13 @@ test:
 	@gcc src/pmm.c test/test.c \
 		-Iframework -Itest -DTEST -lpthread \
 		-o build/test
-	@build/test
+
+test_basic: test
+		@build/test 
+
+testall: test
+		@build/test 0	
+		@build/test 1	
+		@build/test 2	
+		@build/test 3	
+		@build/test 4

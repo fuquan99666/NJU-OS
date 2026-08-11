@@ -5,8 +5,6 @@
 #if !defined(__ISA_NATIVE__) || defined(__NATIVE_USE_KLIB__)
 static unsigned long int next = 1;
 
-int heap_allocated = 0;
-
 int rand(void) {
   // RAND_MAX assumed to be 32767
   next = next * 1103515245 + 12345;
@@ -95,21 +93,23 @@ void *malloc(size_t size) {
   // On native, malloc() will be called during initializaion of C runtime.
   // Therefore do not call panic() here, else it will yield a dead recursion:
   //   panic() -> putchar() -> (glibc) -> malloc() -> panic()
-  // #if !(defined(__ISA_NATIVE__) && defined(__NATIVE_USE_KLIB__))
-  //   panic("Not implemented");
-  // #endif
-  //   return NULL;
+  #if !(defined(__ISA_NATIVE__) && defined(__NATIVE_USE_KLIB__))
+    panic("Not implemented");
+  #endif
+    return NULL;
 
   // directly allocate memory from heap, which is a constant memory area .
-  heap_allocated += size;
-  if (heap_allocated > heap.end - heap.start) {
-    #if !(defined(__ISA_NATIVE__) && defined(__NATIVE_USE_KLIB__)) 
-      panic("Out of memory");
-    #endif 
-      return NULL;
-  }
+  //heap_allocated += size;
+  //if (heap_allocated > heap.end - heap.start) {
+    //#if !(defined(__ISA_NATIVE__) && defined(__NATIVE_USE_KLIB__)) 
+      //panic("Out of memory");
+    //#endif 
+      //return NULL;
+  //}
 
-  return (void *)(heap.start + heap_allocated - size);
+  
+
+  //return (void *)(heap.start + heap_allocated - size);
 }
 
 void free(void *ptr) {

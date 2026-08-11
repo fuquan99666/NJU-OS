@@ -15,3 +15,12 @@ include ../oslabs.mk
 
 CROSS_COMPILE := 
 # image: git
+
+.PHONY : test
+
+
+test:
+	@gcc src/pmm.c test/test.c \
+		-Iframework -Itest -DTEST -lpthread \
+		-o build/test
+	@build/test

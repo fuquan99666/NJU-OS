@@ -1,25 +1,14 @@
+// 当前我们已经完成了一份基础的kalloc和kfree实现
+// 正在尝试实现一个per-cpu的fast_alloc和fast_free，为了防止在修改代码的过程中将基础版本改坏
+// 直接在pmm_1.c开写了！
+
+// pmm_1.c 当前的实现效率比较低，尤其是在处理某个指针到底属于哪个CPU时，并且
+// 由于我们尚且没有实现一个很好的多线程模型，所以在test中，不方便进行fast_alloc 和 fast_kfree的测试
+// 对于当前kalloc, 是直接在本cpu缓存上分配还是？是否需要考虑负载问题？如何在测试框架中获取当前cpu id？
+// 一系列问题，由于尚且没有一个很好的多线程测试模型，所以我们可以先搁置一下，先去完成L2 multi-thread os.
+
+
 #include "common.h"
-
-// PMM : Physical Memory Management
-
-// 我说梦回ics有没有懂的
-
-// 使用互斥锁来避免多线程同时访问内存管理器
-// 恰好mpe.c中提供了atomic_xchg函数，可以用来实现自旋锁
-// 欧，其实我们的测试是直接gcc本地编译的，所以把那个thread.h中自旋锁的实现复制过来即可
-// 至于qemu和native下是否ok,暂时没有太好的验证
-
-// 现在的版本已经实现了一把大锁下的free_list, 由于大内存块的分配频率很低，小内存块的
-// 分配频率很高，所以我们可以考虑对小内存分配走fast路线（每个cpu的缓存内存块），大内存分配照旧，
-// 这样可以大大缓解对锁的竞争。
-
-// fast：每个处理器提前分配一块内存池，内存池中维护一个小内存块的空闲链表，分配小内存块时直接从本地链表中分配，
-// slow：大内存块的分配走全局锁的空闲列表。
-
-// 每个处理器的小缓存还是需要锁的，只不过此时这把小锁只有该处理器的线程会竞争，狠狠加速了。
-// 唯一一个棘手的问题是如果另外一个处理器想要free该处理器缓存上的内存块怎么办？想要跨处理器操作free_list似乎不是很好弄哎
-
-// jyy在上课时提到不用在意内存消耗，可以损耗一些来凑2^i的分配空间格式。但是考虑到我们当前实现没对齐，所以暂时搁置。
 
 static int lock = 0;
 
@@ -196,24 +185,82 @@ static void *kalloc(size_t size) {
         return NULL;
     }
 
-    acquire_lock();
-    
-    // 从空闲链表中查找合适的块（首次适应）
-    Block_Header *curr = (Block_Header*)free_list->head;
+    int id = cpu_current();
 
     int enough_size = 0;
+
+    acquire_per_cpu_lock(id);
 
     // 计算对齐后的大小（包含头部和尾部元数据）
     size_t total_size = size + sizeof(Block_Header) + sizeof(size_t); 
 
+    // 从空闲链表中查找合适的块（首次适应）
+    Block_Header *curr = (Block_Header*)per_cpu_free_list[id]->head;
+
     // Free list head is not available ...
-    if (curr == NULL) {
-        printf("Free list is empty !!!\n");
-        release_lock();
+    if (curr == NULL || per_cpu_free_list[id]->count == 0) {
+        printf("Fast Free list is empty !!!\n");
+        release_per_cpu_lock(id);
         return NULL;
     }
 
-    // print_free_list();
+    // 首先看能不能在当前CPU的fast_alloc缓存中分配
+    while (curr != NULL) {
+
+        enough_size = (curr->size >= total_size);
+        
+        if (enough_size) {
+            // 找到了合适的块
+            size_t remain = curr->size - total_size;
+            
+            // 如果剩余空间足够大，分裂
+            if (remain >= sizeof(Block_Header) + sizeof(size_t) + 8) {
+                // 创建新空闲块
+                Block_Header *new_block = (Block_Header*)((char*)curr + total_size);
+                new_block->size = remain;
+                new_block->used = 0;
+                
+                // 顺手扔进空闲链表，就不多调用一次insert了
+                new_block->next = curr->next;
+                new_block->prev = curr;
+                set_footer(new_block);
+                
+                // 更新当前块
+                curr->size = total_size;
+                curr->next = new_block;
+            } else {
+                // 剩余空间太小，一起分配出去
+            }
+            
+            remove_from_free_list(curr, per_cpu_free_list[id]);
+            
+            // 标记为已分配
+            curr->used = 1;
+            curr->next = NULL;
+            curr->prev = NULL;
+            set_footer(curr);
+
+            printf("Allocated %zu bytes at %p\n", size, curr + 1);
+            
+            // 返回数据区（跳过头部）
+            release_per_cpu_lock(id);
+
+            return (void*)(curr + 1);
+        }
+        curr = curr->next;
+    }
+
+    // 如果当前CPU的fast_alloc缓存中没有合适的块，就去全局的free_list中找
+    printf("CPU %d: No suitable block in fast_alloc cache, checking global free_list...\n", id);
+    curr = free_list->head;
+
+    acquire_lock();
+
+    if (curr == NULL || free_list->count == 0) {
+        printf("Global Free list is empty !!!\n");
+        release_lock();
+        return NULL;
+    }
 
     while (curr != NULL) {
 
@@ -280,19 +327,65 @@ static void kfree(void *ptr) {
         return;
     }
 
-    acquire_lock();
 
-    // print_free_list();
+    // ptr是fast_alloc还是正常alloc呢，如果是fast_alloc的ptr,是当前cpu的缓存分配的吗？还是其他处理器的呢？
+    int index = -1; // -1 is null, 0 is global free_list, 1~N is per_cpu_free_list[0~N-1]
+
+    // 当前这种遍历的效率比较低，可以考虑用一个数据结构存放每个已分配的指针和它对应的cpu id或是global
+
+    // 先遍历几个fast_alloc的缓存链表，看看这个ptr是否在其中
+    for (int i = 0; i < cpu_count(); i++) {
+        acquire_per_cpu_lock(i);
+        Block_Header *curr = (Block_Header*)per_cpu_free_list[i]->head;
+        while (curr != NULL) {
+            if ((void*)(curr + 1) == ptr) {
+                // 找到了这个ptr在第i个CPU的fast_alloc缓存中
+                printf("Freeing pointer %p from CPU %d's fast_alloc cache\n", ptr, i);
+                index = i + 1; 
+                release_per_cpu_lock(i);
+                break;
+            }
+            curr = curr->next;
+        }
+    }
+
+    if (index == -1) {
+        // 在fast_free中没有找到， 接着在全局的free_list中找
+        acquire_lock();
+        Block_Header *curr = (Block_Header*)free_list->head;
+        while (curr != NULL) {
+            if ((void*)(curr + 1) == ptr) {
+                // 找到了这个ptr在全局的free_list中
+                printf("Freeing pointer %p from global free_list\n", ptr);
+                index = 0;
+                release_lock();
+                break;
+            }
+            curr = curr->next;
+        }
+        release_lock();
+    }
+
+    if (index == -1) {
+        // 没有找到这个ptr，说明是非法的
+        printf("kfree: pointer %p is invalid!\n", ptr);
+        return;
+    }
+
+    List* list;
+    if (index == 0) {
+        list = free_list;
+    } else {
+        list = per_cpu_free_list[index - 1];
+    }
     
     // 获取块头部（数据区前面的元数据）
-    // 在写pmm_1.c时发现了一个bug,就是我们需要先验证一下ptr是之前分配的一个块的地址
-    // 不然释放一个未知地址很危险哈 TBD
     Block_Header *block = (Block_Header*)ptr - 1;
     
     // 安全检查：防止 double-free
     if (!block->used) {
         // 实验要求：调用者保证合法，这里可以 panic
-        printf("kfree: double free or invalid pointer!\n");
+        printf("kfree: double free pointer!\n");
         release_lock();
         return;
     }
@@ -302,16 +395,13 @@ static void kfree(void *ptr) {
     block->used = 0;
  
     // 插入空闲链表
-    insert_to_free_list(block, free_list);   
+    insert_to_free_list(block, list);   
 
     // 合并相邻空闲块
-    merge_blocks(block, free_list);
+    merge_blocks(block, list);
 
     printf("Freed memory at %p\n", ptr);
-
-    release_lock();
 }
-
 
 // 初始化时为每个处理器提前分配一块内存，用于小内存的快速分配
 static void init_per_cpu_cache() {
@@ -338,130 +428,6 @@ static void init_per_cpu_cache() {
     
 }
 
-static void *fast_alloc(size_t size) {
-    // 获取当前cpu号
-    int id = cpu_current();
-
-    // 获取当前cpu的缓存free_list 
-    List *cpu_list = per_cpu_free_list[id];
-
-    if (!cpu_list) {
-        fprintf(stderr, "fast_alloc: per_cpu_free_list[%d] is NULL\n", id);
-        return NULL;
-    }
-
-    if (cpu_list->count == 0 || !cpu_list->head) {
-        fprintf(stderr, "fast_alloc: per_cpu_free_list[%d] doesn't have a free block!\n", id);
-        return NULL;
-    }
-
-    Block_Header *curr = cpu_list->head;
-
-    // 为每个cpu的fast_alloc加锁，防止同一个线程前后竞争
-    acquire_per_cpu_lock(id);
-
-    // copy from kalloc
-
-    int enough_size = 0;
-
-    // 计算对齐后的大小（包含头部和尾部元数据）
-    size_t total_size = size + sizeof(Block_Header) + sizeof(size_t); 
-
-    while (curr != NULL) {
-
-        enough_size = (curr->size >= total_size);
-        
-        if (enough_size) {
-            // 找到了合适的块
-            size_t remain = curr->size - total_size;
-            
-            // 如果剩余空间足够大，分裂
-            if (remain >= sizeof(Block_Header) + sizeof(size_t) + 8) {
-                // 创建新空闲块
-                Block_Header *new_block = (Block_Header*)((char*)curr + total_size);
-                new_block->size = remain;
-                new_block->used = 0;
-                
-                // 顺手扔进空闲链表，就不多调用一次insert了
-                new_block->next = curr->next;
-                new_block->prev = curr;
-                set_footer(new_block);
-                
-                // 更新当前块
-                curr->size = total_size;
-                curr->next = new_block;
-            } else {
-                // 剩余空间太小，一起分配出去
-            }
-            
-            remove_from_free_list(curr, cpu_list);
-            
-            // 标记为已分配
-            curr->used = 1;
-            curr->next = NULL;
-            curr->prev = NULL;
-            set_footer(curr);
-
-            printf("Allocated %zu bytes at %p\n", size, curr + 1);
-            
-            // 返回数据区（跳过头部）
-            release_lock();
-
-            return (void*)(curr + 1);
-        }
-        curr = curr->next;
-    }
-
-    // 没有找到合适的块
-    printf("Loop through CPU[%d]'s free list but can't find any enough block !\n", id);
-
-
-    // release the lock 
-    release_per_cpu_lock(id);
-
-    return NULL;
-}
-
-
-static void fast_free(void *ptr) {
-    if (!ptr) {
-        printf("kfree: NULL pointer!\n");
-        return;
-    }
-
-    // 这里会出现一种情况：执行该fast_free的线程是CPU A, 但是这个ptr是CPU B上fast分配的。。。
-    // 还有一种情况是：小内存一定就在fast_list 上吗，有可能出现那种fast_list已经分配满了的情况哎
-
-    // 获取当前cpu id
-    int id = cpu_current();
-
-    acquire_per_cpu_lock(id);
-
-    // 获取块头部（数据区前面的元数据）
-    Block_Header *block = (Block_Header*)ptr - 1;
-    
-    // 安全检查：防止 double-free
-    if (!block->used) {
-        // 实验要求：调用者保证合法，这里可以 panic
-        printf("kfree: double free or invalid pointer!\n");
-        release_lock();
-        return;
-    }
-
-    
-    // 标记为空闲
-    block->used = 0;
- 
-    // 插入空闲链表
-    insert_to_free_list(block, per_cpu_free_list[id]);   
-
-    // 合并相邻空闲块
-    merge_blocks(block, per_cpu_free_list[id]);
-
-    printf("Freed memory at %p\n", ptr);
-
-    release_lock();
-}
 
 #ifndef TEST
 static void pmm_init() {
@@ -494,6 +460,8 @@ static void pmm_init() {
     // 4. 加入空闲链表
     free_list->head = first_block;
     free_list->count = 1;
+
+    init_per_cpu_cache(); // 初始化每个CPU的fast_alloc缓存
     
     printf(
         "Got %d MiB heap: [%p, %p)\n",

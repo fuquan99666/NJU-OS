@@ -4,8 +4,22 @@
 #include <unistd.h>
 #include <sys/types.h>
 #include <fcntl.h>
+#include <regex.h>
+#include <time.h>
+#include <string.h>
 
 // extern char **environ;
+
+int top_k = 5;
+
+typedef struct syscall_record {
+    char name[64];
+    double time;
+} syscall_record;
+
+// the regex pattern to match the system call line in strace output 
+static const char *re = "([a-zA-Z_][a-zA-Z0-9_]*)\\(.*\\) += +(-?[0-9]+) +<([0-9.]+)>";
+
 
 /*
 
@@ -17,7 +31,7 @@ We will print the time cost of the system calls which the command
 will call .
 
 if the command is so fast , you can just print once .
-but if the command is slow, maybe 10 times per second is enough
+but if the command is slow, maybe 1 times per second is enough
 Well, if the command is blocked by read or ... so that there is no system calls, 
 you can wait until the system call is done !
 
@@ -53,13 +67,130 @@ Good steps to implement it:
   //exit(EXIT_FAILURE);
 //}
 
+syscall_record regex_system_call(char* buffer) {
+
+    regex_t regex;
+    regmatch_t matches[4]; // We expect 3 matches: the whole line, the syscall name, and the time cost
+
+    // first , we should compile the regex pattern 
+    if (regcomp(&regex, re, REG_EXTENDED) != 0) {
+        fprintf(stderr, "Could not compile regex: %s\n", buffer);
+        return (syscall_record){0};
+    }
+
+    if (regexec(&regex, buffer, 4, matches, 0) == 0) {
+        // Extract syscall name
+        int name_length = matches[1].rm_eo - matches[1].rm_so;
+        char syscall_name[64];
+        strncpy(syscall_name, buffer + matches[1].rm_so, name_length);
+        syscall_name[name_length] = '\0';
+
+        // Extract time cost
+        int time_length = matches[3].rm_eo - matches[3].rm_so;
+        char time_str[32];
+        strncpy(time_str, buffer + matches[3].rm_so, time_length);
+        time_str[time_length] = '\0';
+        double time_cost = atof(time_str);
+
+        syscall_record record = {.name = "", .time = time_cost};
+        strncpy(record.name, syscall_name, sizeof(record.name) - 1);
+        record.name[sizeof(record.name) - 1] = '\0';
+
+        return record;
+        // printf("System call: %s, Time cost: %f seconds\n", syscall_name, time_cost);
+    } else {
+        // printf("No match for line\n");
+    }
+
+    regfree(&regex);
+    return (syscall_record){0};
+}
+
 void read_and_parse_strace_output() {
     char buffer[1024];
+
+    syscall_record records[top_k];
+    // init syscall_record
+    for (int i = 0; i < top_k; i++) {
+        records[i].name[0] = '\0';
+        records[i].time = 0.0;
+    }
+
+
+    time_t start_time = time(NULL);
+    int record_count = 0;
+
     while (fgets(buffer, sizeof(buffer), stdin)) {
         // Parse the output of strace here
         // For example, you can look for lines that contain system calls and their time cost
         // and then print the top 5 system calls per update.
-        printf("%s", buffer);
+        // printf("%s", buffer);
+        // 我们每隔1s打印一次top 5的系统调用和它们的时间消耗
+        time_t current_time = time(NULL);
+        // printf("Current time: %d, Start time: %d\n", current_time, start_time);
+        if (current_time - start_time >= 1) {
+            // Print top 5 system calls 
+            record_count ++;
+            start_time = current_time;
+            printf("Time: %d\n", record_count);
+            // printf("Buffer: %s\n", buffer);
+
+            double total_time = 0.0;
+            for (int i = 0; i < top_k; i++) {
+                total_time += records[i].time;
+            }
+            for (int i = 0; i < top_k; i++) {
+                double ratio = (total_time > 0) ? (records[i].time / total_time) * 100.0 : 0.0;
+                printf("%s (%.2f%%) \n", records[i].name, ratio);
+            }
+
+            // reset the records for the next second
+            for (int i = 0; i < top_k; i++) {
+                records[i].name[0] = '\0';
+                records[i].time = 0.0;
+            }
+        }
+
+        // update the records array with the new system call and its time cost 
+        // we can use regex to judge if the line is a system call line or not 
+        syscall_record new_call = regex_system_call(buffer);
+        if (new_call.time > 0) {
+            // loop the current records array to judge
+            int min_index = -1;
+            int min_time = 999;
+            int flag = 0;
+            for (int i = 0; i < top_k; i++) {
+                // no record yet
+                if (records[i].time == 0) {
+                    records[i] = (struct syscall_record){.name = "", .time = new_call.time};
+                    strncpy(records[i].name, new_call.name, sizeof(records[i].name) - 1);
+                    records[i].name[sizeof(records[i].name) - 1] = '\0';
+                    flag = 1;
+                    break;
+                } else if (strcmp(records[i].name, new_call.name) == 0) {
+                    // found the same system call, update its time cost
+                    records[i].time += new_call.time;
+                    flag = 1;
+                    break;
+                } else {
+                    // find the minimum time cost record
+                    if (records[i].time < min_time) {
+                        min_time = records[i].time;
+                        min_index = i;
+                    }
+                }
+            }
+
+            if (flag == 0) {
+                // if the new system call's time cost is greater than the minimum time cost record, replace it
+                if (new_call.time > min_time && min_index != -1) {
+                    records[min_index] = (struct syscall_record){.name = "", .time = new_call.time};
+                    strncpy(records[min_index].name, new_call.name, sizeof(records[min_index].name) - 1);
+                    records[min_index].name[sizeof(records[min_index].name) - 1] = '\0';
+                }
+            }
+        }
+
     }
 }
 
@@ -72,12 +203,13 @@ int main(int argc, char *argv[]) {
 
     // Step 1: parse the command and arguments from argv
     int new_argc = argc ;
-    char *new_argv[new_argc+1];
+    char *new_argv[new_argc+2];
     for (int i = 0; i < new_argc; i++) {
-        new_argv[i] = argv[i];
+        new_argv[i+1] = argv[i];
     }
     new_argv[0] = "strace";
-    new_argv[new_argc] = NULL;
+    new_argv[1] = "-T";
+    new_argv[new_argc+1] = "NULL";
 
     // Step 2: use fork() to create a child process
 

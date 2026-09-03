@@ -67,23 +67,23 @@ Good steps to implement it:
   //exit(EXIT_FAILURE);
 //}
 
-syscall_record regex_system_call(char* buffer) {
+regex_t regex;
+regmatch_t matches[4]; 
 
-    regex_t regex;
-    regmatch_t matches[4]; // We expect 3 matches: the whole line, the syscall name, and the time cost
-
-    // first , we should compile the regex pattern 
+// for one re, we only compile it once...
+void regex_init() {
     if (regcomp(&regex, re, REG_EXTENDED) != 0) {
-        fprintf(stderr, "Could not compile regex: %s\n", buffer);
-        return (syscall_record){0};
+        fprintf(stderr, "Could not compile regex: %s\n", re);
+        exit(EXIT_FAILURE);
     }
+}
+
+
+syscall_record regex_system_call(char* buffer) {
 
     if (regexec(&regex, buffer, 4, matches, 0) == 0) {
         // Extract syscall name
         int name_length = matches[1].rm_eo - matches[1].rm_so;
-        char syscall_name[64];
-        strncpy(syscall_name, buffer + matches[1].rm_so, name_length);
-        syscall_name[name_length] = '\0';
 
         // Extract time cost
         int time_length = matches[3].rm_eo - matches[3].rm_so;
@@ -93,8 +93,8 @@ syscall_record regex_system_call(char* buffer) {
         double time_cost = atof(time_str);
 
         syscall_record record = {.name = "", .time = time_cost};
-        strncpy(record.name, syscall_name, sizeof(record.name) - 1);
-        record.name[sizeof(record.name) - 1] = '\0';
+        strncpy(record.name, buffer + matches[1].rm_so, name_length);
+        record.name[name_length] = '\0';
 
         return record;
         // printf("System call: %s, Time cost: %f seconds\n", syscall_name, time_cost);
@@ -102,7 +102,6 @@ syscall_record regex_system_call(char* buffer) {
         // printf("No match for line\n");
     }
 
-    regfree(&regex);
     return (syscall_record){0};
 }
 
@@ -119,6 +118,8 @@ void read_and_parse_strace_output() {
 
     time_t start_time = time(NULL);
     int record_count = 0;
+
+    regex_init();
 
     while (fgets(buffer, sizeof(buffer), stdin)) {
         // Parse the output of strace here
@@ -163,8 +164,7 @@ void read_and_parse_strace_output() {
                 // no record yet
                 if (records[i].time == 0) {
                     records[i] = (struct syscall_record){.name = "", .time = new_call.time};
-                    strncpy(records[i].name, new_call.name, sizeof(records[i].name) - 1);
-                    records[i].name[sizeof(records[i].name) - 1] = '\0';
+                    strncpy(records[i].name, new_call.name, strlen(new_call.name)+1);
                     flag = 1;
                     break;
                 } else if (strcmp(records[i].name, new_call.name) == 0) {
@@ -185,13 +185,14 @@ void read_and_parse_strace_output() {
                 // if the new system call's time cost is greater than the minimum time cost record, replace it
                 if (new_call.time > min_time && min_index != -1) {
                     records[min_index] = (struct syscall_record){.name = "", .time = new_call.time};
-                    strncpy(records[min_index].name, new_call.name, sizeof(records[min_index].name) - 1);
-                    records[min_index].name[sizeof(records[min_index].name) - 1] = '\0';
+                    strncpy(records[min_index].name, new_call.name, strlen(new_call.name)+1);
                 }
             }
         }
 
     }
+
+    regfree(&regex);
 }
 
 int main(int argc, char *argv[]) {

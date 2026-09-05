@@ -1,4 +1,4 @@
-#include "common.h"
+#include <common.h>
 
 // PMM : Physical Memory Management
 
@@ -314,7 +314,7 @@ static void kfree(void *ptr) {
 
 
 // 初始化时为每个处理器提前分配一块内存，用于小内存的快速分配
-static void init_per_cpu_cache() {
+static __attribute__((unused)) void init_per_cpu_cache() {
     // 我们已经初始化了static List** per_cpu_free_list, 现在我们为每个CPU分配一个List结构
     // 并且分配实际的物理内存
 
@@ -338,7 +338,7 @@ static void init_per_cpu_cache() {
     
 }
 
-static void *fast_alloc(size_t size) {
+static __attribute__((unused)) void *fast_alloc(size_t size) {
     // 获取当前cpu号
     int id = cpu_current();
 
@@ -346,12 +346,12 @@ static void *fast_alloc(size_t size) {
     List *cpu_list = per_cpu_free_list[id];
 
     if (!cpu_list) {
-        fprintf(stderr, "fast_alloc: per_cpu_free_list[%d] is NULL\n", id);
+        printf("fast_alloc: per_cpu_free_list[%d] is NULL\n", id);
         return NULL;
     }
 
     if (cpu_list->count == 0 || !cpu_list->head) {
-        fprintf(stderr, "fast_alloc: per_cpu_free_list[%d] doesn't have a free block!\n", id);
+        printf("fast_alloc: per_cpu_free_list[%d] doesn't have a free block!\n", id);
         return NULL;
     }
 
@@ -423,7 +423,7 @@ static void *fast_alloc(size_t size) {
 }
 
 
-static void fast_free(void *ptr) {
+static __attribute__((unused)) void fast_free(void *ptr) {
     if (!ptr) {
         printf("kfree: NULL pointer!\n");
         return;

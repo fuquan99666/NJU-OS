@@ -7,3 +7,16 @@
 // not present in kernel.h. 
 
 // Include these definitions in os.h.
+
+#include <klib.h>
+#include <klib-macros.h>
+
+struct spinlock{
+
+};
+struct semaphore{
+
+};
+struct task{
+
+};

@@ -1,4 +1,4 @@
-#include "kernel.h"
+#include <kernel.h>
 #include "thread.h"
 
 // 为了在本地方便测试，我们新建了一个test文件夹

@@ -61,6 +61,7 @@ Steps:
 #include <fcntl.h>
 #include <unistd.h>
 #include "fat32.h"
+#include <string.h>
 
 struct fat32hdr *bpb = NULL;
 void *mapped_image = NULL;
@@ -149,32 +150,112 @@ void scan_directory_entries(u32 current_cluster) {
         // loop through each entry of the cluster 
          
         char *entry = cluster_addr + i;
-        if (entry[8] == 'B' && entry[9] == 'M' && entry[10] == 'P') {
-            // this is a bmp file entry, we can get its name , size and first cluster ...
-            char name[64]; // maybe a long name ... but now we just assume it is a short name
-            u32 bmp_size = *(u32*)(entry + 28);
-            u32 first_cluster = *(u16*)(entry + 26) | (*(u16*)(entry + 20) << 16);
 
-            for (int j = 0; j < 12; j++) {
-                if (j < 8) {
-                    name[j] = entry[j];
-                } else if (j == 8) {
-                    name[j] = '.';
-                } else {
-                    name[j] = entry[j-1];
+        char name[64];
+
+        // The most important thing : check the entry's attr 
+        u8 attr = entry[11];
+
+        if (attr == ATTR_LONG_NAME) {
+            // check the first byte 
+            if (entry[0] == 0x01 || entry[0] == 0x41) {
+                // this is the first entry of a long name , we can start from it to the end one 
+                // get the long name 
+                char *p = name;
+                char *curr_entry = entry;
+
+                while(1) {
+
+                    // notice : the long name use 2 bytes to store a character ...
+                    // get the name from current entry 
+
+                    // LDIR_Name1 : 1-10 bytes 
+                    for (int j = 1; j < 11; j+=2) {
+                        u16 ch = *(u16*)(curr_entry + j);
+                        *p++ = (char)(ch & 0xff); // the low byte 
+                        if (ch == 0x0000) {
+                            break;
+                        }
+                    }
+
+                    // LDIR_Name2 : 14-25 bytes
+                    for (int j = 14; j < 26; j+=2) {
+                        u16 ch = *(u16*)(curr_entry + j);
+                        *p++ = (char)(ch & 0xff); // the low byte
+                        if (ch == 0x0000) {
+                            break;
+                        }
+                    }
+
+                    // LDIR_Name3 : 28-31 bytes
+                    for (int j = 28; j < 32; j+=2) {
+                        u16 ch = *(u16*)(curr_entry + j);
+                        *p++ = (char)(ch & 0xff); // the low byte
+                        if (ch == 0x0000) {
+                            break;
+                        }
+                    }
+
+                    if (curr_entry[0] & 0x40) {
+                        // this is the last entry of the long name 
+                        break;
+                    }
+
+                    // move to the next entry
+                    curr_entry -= 32;
                 }
+
+                *p = '\0'; // null terminate the name, 防止某些名字刚好是13的倍数（没有NULL了）
+
+                // get other info based on the next actual short entry 
+                char *short_entry = entry + 32; 
+                u32 bmp_size = *(u32*)(short_entry + 28);
+                u32 first_cluster = *(u16*)(short_entry + 26) | (*(u16*)(short_entry + 20) << 16);
+
+                printf("Found BMP file (long name): %s, size: %u, first cluster: %u\n", name, bmp_size, first_cluster);
+
+                get_bmp(first_cluster, bmp_size, name);
+
+                // skip the next short entry 
+                i += 32;
             }
-            name[12] = '\0';
+        } else {
+            // this is a short entry that don't have a long name ...
+            if (entry[0] == 0x00 || (unsigned char)entry[0] == 0xe5) {
+                // this entry is free , so we can skip it 
+                continue;
+            }
 
-            printf("Found BMP file: %s, size: %u, first cluster: %u\n", name, bmp_size, first_cluster);
+            if (attr & ATTR_DIRECTORY) {
+                // this entry is a directory file , so we can skip it 
+                continue;
+            }
+            if (entry[8] == 'B' && entry[9] == 'M' && entry[10] == 'P') {
+                // this is a bmp file entry, we can get its name , size and first cluster ...
+                u32 bmp_size = *(u32*)(entry + 28);
+                u32 first_cluster = *(u16*)(entry + 26) | (*(u16*)(entry + 20) << 16);
 
-            // Now we can recover this bmp file by reading its data from the first cluster and its size
-            // Of course, this is based on the assumption that the bmp file is continuous if its size is larger than a cluster 
-            // And we can check if its header is a bmp header 
+                for (int j = 0; j < 12; j++) {
+                    if (j < 8) {
+                        name[j] = entry[j];
+                    } else if (j == 8) {
+                        name[j] = '.';
+                    } else {
+                        name[j] = entry[j-1];
+                    }
+                }
+                name[12] = '\0';
+            
+                printf("Found BMP file (short name): %s, size: %u, first cluster: %u\n", name, bmp_size, first_cluster);
 
-            get_bmp(first_cluster, bmp_size, name);
+                // Now we can recover this bmp file by reading its data from the first cluster and its size
+                // Of course, this is based on the assumption that the bmp file is continuous if its size is larger than a cluster 
+                // And we can check if its header is a bmp header 
 
-        }
+                get_bmp(first_cluster, bmp_size, name);
+
+            }
+        } 
         
     }
 }
@@ -265,8 +346,6 @@ int main(int argc, char *argv[]) {
     u32 DataSec = bpb->BPB_TotSec32 - first_data_sector;
     u32 CountOfClusters = DataSec / bpb->BPB_SecPerClus;
     u32 current_cluster_index = bpb->BPB_RootClus;
-
-    printf("The count of clusters in data area: %u\n", CountOfClusters);
 
     // Start to scan 
     while (1)

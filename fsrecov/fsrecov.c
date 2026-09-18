@@ -54,6 +54,7 @@ Steps:
 
 */
 
+#define _GNU_SOURCE
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/mman.h>
@@ -62,6 +63,7 @@ Steps:
 #include <unistd.h>
 #include "fat32.h"
 #include <string.h>
+#include <dirent.h>
 
 struct fat32hdr *bpb = NULL;
 void *mapped_image = NULL;
@@ -151,7 +153,7 @@ void scan_directory_entries(u32 current_cluster) {
          
         char *entry = cluster_addr + i;
 
-        char name[64];
+        char name[128];
 
         // The most important thing : check the entry's attr 
         u8 attr = entry[11];
@@ -164,6 +166,10 @@ void scan_directory_entries(u32 current_cluster) {
                 char *p = name;
                 char *curr_entry = entry;
 
+
+                // 这里其实有个隐藏的小问题，就是得检查p是否已经超过name的长度了
+                // 不然可能会发生越界，触碰到金丝雀emmm
+                // 很不幸我的代码在 -m32，name[64] 发生了这个问题，改成128就好了，正确的判断也懒得加了hhh
                 while(1) {
 
                     // notice : the long name use 2 bytes to store a character ...
@@ -385,6 +391,65 @@ int main(int argc, char *argv[]) {
             break;
         }
     }
-    
 
+    // after scanning all clusters which will save all recovered bmp files to /tmp directory
+    // we can use sha1sum to get the SHA1 fingerprint of each bmp file and print it to the STDOUT
+    // format: sha1sum filename
+
+    // we can use opendir, readdir, closedir 
+
+    DIR *dir = opendir("/tmp"); 
+
+    if (dir == NULL) {
+        perror("opendir");
+        exit(EXIT_FAILURE);
+    }
+
+    struct dirent *entry;
+    
+    //FILE *file = fopen("./a.txt", "w");
+    //if (file == NULL) {
+        //perror("fopen");
+        //closedir(dir);
+        //exit(EXIT_FAILURE);
+    //}
+
+    while((entry = readdir(dir)) != NULL) {
+        // check if the entry is a bmp file
+        if (entry->d_type == DT_REG) {
+            // check if the entry's name ends with .bmp
+            char *name = entry->d_name;
+            int len = strlen(name);
+            if (len > 4 && strcmp(name + len - 4, ".bmp") == 0) {
+                // this is a bmp file, we can use sha1sum to get its SHA1 fingerprint 
+
+                // at early lab, we must use fork + pipe + exec to do child commmand ...
+                // now just use popen !!!
+
+                char cmd[256];
+                if (snprintf(cmd, sizeof(cmd), "sha1sum /tmp/%s", name) < 0) {
+                    perror("snprintf");
+                    continue;
+                }
+                FILE *fp = popen(cmd, "r");
+                if (fp == NULL) {
+                    perror("popen");
+                    continue;
+                }
+
+                char sha1[41];
+                // use fscanf to get the SHA1 fingerprint from the output of sha1sum
+                fscanf(fp, "%s", sha1);
+                pclose(fp);
+
+                // print the SHA1 fingerprint and the bmp file's name to the STDOUT
+                //fprintf(file, "%s %s\n", sha1, name);
+                printf("%s %s\n", sha1, name);
+            }
+        }
+    }
+
+    // fclose(file);
+    closedir(dir);
+    
 }
